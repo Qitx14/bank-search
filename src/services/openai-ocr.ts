@@ -20,8 +20,11 @@ const OPENROUTER_API = import.meta.env.DEV
   ? '/api/openrouter/api/v1/chat/completions'
   : 'https://openrouter.ai/api/v1/chat/completions';
 
-// OpenRouter 上的 GPT-4o 模型（视觉能力更强，OCR 中文更准确）
-const MODEL = 'openai/gpt-4o';
+// Gemini 2.0 Flash：速度比 GPT-4o 快 3-5 倍，中文 OCR 能力足够
+const MODEL = 'google/gemini-2.0-flash-001';
+
+// 并行处理并发数
+const CONCURRENCY = 3;
 
 /** API Key 存储 key */
 export const API_KEY_STORAGE = 'openrouter-api-key';
@@ -42,7 +45,52 @@ export function clearApiKey(): void {
 }
 
 /**
- * 调用 OpenRouter API（GPT-4o）识别单张图片中的题目 + 选项
+ * 压缩图片：缩放 + JPEG 压缩，将 iPhone 照片从 3-5MB 降到 ~150KB
+ * @param dataUrl 原始图片 base64
+ * @returns 压缩后的 base64
+ */
+function compressImage(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX_WIDTH = 1024;
+      const MAX_HEIGHT = 1024;
+      let { width, height } = img;
+
+      // 等比缩放
+      if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d')!;
+
+      // 绘制到 canvas（缩放）
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // JPEG 质量 0.7，平衡清晰度和文件大小
+      const compressed = canvas.toDataURL('image/jpeg', 0.7);
+
+      const originalKB = (dataUrl.length * 0.75 / 1024).toFixed(0);
+      const compressedKB = (compressed.length * 0.75 / 1024).toFixed(0);
+      console.log(`[OCR] 图片压缩: ${originalKB}KB → ${compressedKB}KB (${width}x${height})`);
+
+      resolve(compressed);
+    };
+    img.onerror = () => {
+      console.warn('[OCR] 图片加载失败，使用原图');
+      resolve(dataUrl); // 回退：用原图
+    };
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * 调用 OpenRouter API（Gemini Flash）识别单张图片中的题目 + 选项
  */
 async function recognizeImage(
   dataUrl: string,
@@ -53,8 +101,8 @@ async function recognizeImage(
     throw new Error('图片数据格式无效');
   }
 
-  const imageSizeMB = (dataUrl.length * 0.75) / (1024 * 1024);
-  console.log(`[OCR] 准备识别图片，大小: ${imageSizeMB.toFixed(1)} MB, 接口: ${OPENROUTER_API}`);
+  // 压缩图片
+  const compressed = await compressImage(dataUrl);
 
   let response: Response;
   try {
@@ -78,7 +126,7 @@ async function recognizeImage(
               },
               {
                 type: 'image_url',
-                image_url: { url: dataUrl },
+                image_url: { url: compressed },
               },
             ],
           },
@@ -158,34 +206,45 @@ async function recognizeImage(
 
 /**
  * 批量识别图片中的题目文字
- * 逐张串行调用 API
+ * 并发处理（3 张同时进行），大幅提升速度
  */
 export async function batchRecognize(
   dataUrls: string[],
   apiKey: string,
   onProgress: (p: OcrProgress) => void,
 ): Promise<OcrItemResult[]> {
-  const results: OcrItemResult[] = [];
+  const results: OcrItemResult[] = new Array(dataUrls.length);
+  let completed = 0;
 
-  for (let i = 0; i < dataUrls.length; i++) {
-    onProgress({
-      current: i + 1,
-      total: dataUrls.length,
-      status: `AI 正在识别第 ${i + 1}/${dataUrls.length} 张...`,
+  // 将图片分组，每组 CONCURRENCY 张并行处理
+  for (let chunkStart = 0; chunkStart < dataUrls.length; chunkStart += CONCURRENCY) {
+    const chunk = dataUrls.slice(chunkStart, chunkStart + CONCURRENCY);
+    const chunkIndices = chunk.map((_, j) => chunkStart + j);
+
+    const chunkPromises = chunk.map((dataUrl, j) => {
+      const index = chunkIndices[j];
+      return recognizeImage(dataUrl, apiKey)
+        .then(result => {
+          results[index] = { text: result.text, parsed: result.parsed };
+        })
+        .catch(err => {
+          results[index] = {
+            text: '',
+            error: err instanceof Error ? err.message : '识别失败',
+          };
+        })
+        .finally(() => {
+          completed++;
+          onProgress({
+            current: completed,
+            total: dataUrls.length,
+            status: `AI 正在识别第 ${completed}/${dataUrls.length} 张...`,
+          });
+        });
     });
 
-    try {
-      const result = await recognizeImage(dataUrls[i], apiKey);
-      results.push({
-        text: result.text,
-        parsed: result.parsed,
-      });
-    } catch (err) {
-      results.push({
-        text: '',
-        error: err instanceof Error ? err.message : '识别失败',
-      });
-    }
+    // 等待当前批次全部完成，再发下一批
+    await Promise.all(chunkPromises);
   }
 
   return results;
