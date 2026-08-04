@@ -271,7 +271,7 @@ export default function SearchPage() {
 
             {/* 匹配结果 */}
             {!item.error && item.matches.length > 0 ? (
-              item.matches.slice(0, 2).map((match, mIdx) => (
+              [item.matches[0]].map((match, mIdx) => (
                 <div key={mIdx} style={{ marginTop: 'var(--space-sm)' }}>
                   <AnswerCard
                     question={match.question}

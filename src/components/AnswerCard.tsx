@@ -101,7 +101,7 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
           background: '#E8F5E9',
           borderRadius: 'var(--radius-sm)',
           padding: 'var(--space-md)',
-          textAlign: 'center',
+          textAlign: sheetType === 'multiple' ? 'left' : 'center',
         }}>
           <div style={{
             font: 'var(--font-caption)',
@@ -110,20 +110,40 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
           }}>
             应选
           </div>
-          <div style={{
-            font: '700 32px var(--font-family)',
-            color: 'var(--color-success)',
-            marginBottom: 'var(--space-sm)',
-          }}>
-            {examAnswer}
-          </div>
-          <div style={{
-            font: 'var(--font-body)',
-            color: 'var(--color-text-primary)',
-            lineHeight: 1.5,
-          }}>
-            {examAnswerContent}
-          </div>
+
+          {/* 多选题：逐条显示 A：xxx / C：xxx */}
+          {sheetType === 'multiple' ? (() => {
+            const labels = examAnswer.split('');
+            const contents = examAnswerContent.split('；');
+            return labels.map((label, i) => (
+              <div key={label} style={{
+                font: 'var(--font-body)',
+                color: 'var(--color-text-primary)',
+                lineHeight: 1.6,
+                padding: '2px 0',
+              }}>
+                <span style={{ fontWeight: 700, color: 'var(--color-success)' }}>{label}</span>
+                <span>：{contents[i] || ''}</span>
+              </div>
+            ));
+          })() : (
+            <>
+              <div style={{
+                font: '700 32px var(--font-family)',
+                color: 'var(--color-success)',
+                marginBottom: 'var(--space-sm)',
+              }}>
+                {examAnswer}
+              </div>
+              <div style={{
+                font: 'var(--font-body)',
+                color: 'var(--color-text-primary)',
+                lineHeight: 1.5,
+              }}>
+                {examAnswerContent}
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
