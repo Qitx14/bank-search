@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" fill="none" viewBox="0 0 512 512">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#1976D2"/>
+  <!-- Magnifying glass -->
+  <circle cx="240" cy="240" r="80" fill="none" stroke="#FFFFFF" stroke-width="28"/>
+  <!-- Magnifying glass handle -->
+  <line x1="295" y1="290" x2="360" y2="355" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+  <!-- Question mark inside glass -->
+  <text x="240" y="265" text-anchor="middle" font-family="-apple-system, PingFang SC, sans-serif" font-size="90" font-weight="700" fill="#FFFFFF">?</text>
+</svg>
