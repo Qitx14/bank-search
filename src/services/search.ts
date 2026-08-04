@@ -143,25 +143,24 @@ export function matchOptionLabel(
     return null;
   }
 
-  // 从题库选项中获取正确选项的内容
-  const correctContents: string[] = [];
+  // 从题库选项中获取每个正确选项的内容
+  const answerContents: { letter: string; content: string }[] = [];
   for (const letter of answerLetters) {
     const idx = letter.toUpperCase().charCodeAt(0) - 65; // A=0, B=1, ...
     if (idx >= 0 && idx < bankOptions.length) {
       const cleaned = cleanOptionText(bankOptions[idx]);
-      correctContents.push(cleaned);
+      answerContents.push({ letter, content: cleaned });
     }
   }
 
-  if (correctContents.length === 0) {
+  if (answerContents.length === 0) {
     console.warn('[Search] 无法从题库选项中提取正确选项内容');
     return null;
   }
 
-  const targetContent = correctContents.join('；');
-  console.log(`[Search] 题库正确答案: ${answer} → 内容: "${targetContent}"`);
+  console.log(`[Search] 题库正确答案: ${answer} → 内容:`, answerContents.map(a => `${a.letter}:${a.content}`).join(', '));
 
-  // 对 OCR 选项用 bigram 匹配，找到与目标内容最相似的
+  // OCR 选项清洗
   const ocrCleaned = ocrOptions.map(o => ({
     label: o.label,
     text: cleanOptionText(o.text),
@@ -169,43 +168,63 @@ export function matchOptionLabel(
 
   console.log(`[Search] OCR 选项:`, ocrCleaned.map(o => `${o.label}: ${o.text.slice(0, 30)}`).join(', '));
 
-  // 对每个 OCR 选项计算 bigram 相似度
-  const scored = ocrCleaned.map(o => {
-    const textLower = o.text.toLowerCase();
-    const targetLower = targetContent.toLowerCase();
-
-    // 完全包含：高分
-    if (textLower === targetLower) return { ...o, score: 1.0 };
-    if (textLower.includes(targetLower) || targetLower.includes(textLower)) {
-      const lenRatio = Math.min(textLower.length, targetLower.length) /
-        Math.max(textLower.length, targetLower.length);
-      return { ...o, score: 0.7 + lenRatio * 0.3 };
+  /** 计算两个文本的 bigram 相似度 */
+  function bigramScore(a: string, b: string): number {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower === bLower) return 1.0;
+    if (aLower.includes(bLower) || bLower.includes(aLower)) {
+      const lenRatio = Math.min(aLower.length, bLower.length) / Math.max(aLower.length, bLower.length);
+      return 0.7 + lenRatio * 0.3;
     }
-
-    // Bigram 重叠率
     let overlap = 0;
-    for (let i = 0; i < targetLower.length - 1; i++) {
-      const bigram = targetLower.slice(i, i + 2);
-      if (textLower.includes(bigram)) overlap++;
+    for (let i = 0; i < bLower.length - 1; i++) {
+      if (aLower.includes(bLower.slice(i, i + 2))) overlap++;
     }
-    const maxBigrams = Math.max(1, targetLower.length - 1);
-    return { ...o, score: overlap / maxBigrams };
-  });
+    return overlap / Math.max(1, bLower.length - 1);
+  }
 
-  scored.sort((a, b) => b.score - a.score);
+  // 对每个正确答案内容，找到最匹配的 OCR 选项
+  const MATCH_THRESHOLD = 0.35;
+  const matchedLabels: string[] = [];
+  const matchedContents: string[] = [];
+  const usedLabels = new Set<string>(); // 避免同一 OCR 选项被匹配多次
 
-  console.log(`[Search] 选项匹配分数:`, scored.map(s => `${s.label}: ${s.score.toFixed(3)}`).join(', '));
+  for (const ac of answerContents) {
+    let bestLabel = '';
+    let bestContent = '';
+    let bestScore = 0;
 
-  const best = scored[0];
-  const MATCH_THRESHOLD = 0.4;
+    for (const ocr of ocrCleaned) {
+      if (usedLabels.has(ocr.label)) continue; // 已被匹配过
+      const score = bigramScore(ocr.text, ac.content);
+      console.log(`[Search]   匹配 "${ac.content.slice(0, 30)}" ↔ OCR${ocr.label} "${ocr.text.slice(0, 30)}" → ${score.toFixed(3)}`);
+      if (score > bestScore) {
+        bestScore = score;
+        bestLabel = ocr.label;
+        bestContent = ocr.text;
+      }
+    }
 
-  if (!best || best.score < MATCH_THRESHOLD) {
-    console.warn(`[Search] 最佳匹配 "${best?.label}" 分数 ${best?.score.toFixed(3)} < ${MATCH_THRESHOLD}，返回 null`);
+    if (bestScore >= MATCH_THRESHOLD) {
+      matchedLabels.push(bestLabel);
+      matchedContents.push(bestContent);
+      usedLabels.add(bestLabel);
+      console.log(`[Search]   ✅ 题库${ac.letter} → 考试选 ${bestLabel} (score=${bestScore.toFixed(3)})`);
+    } else {
+      console.warn(`[Search]   ❌ 题库${ac.letter} 内容 "${ac.content.slice(0, 30)}" 未匹配到 OCR 选项 (best=${bestScore.toFixed(3)})`);
+    }
+  }
+
+  if (matchedLabels.length === 0) {
+    console.warn('[Search] 所有正确答案均未匹配到 OCR 选项');
     return null;
   }
 
-  console.log(`[Search] ✅ 选项映射成功: 题库${answer} → 考试选 ${best.label}，内容: "${best.text}"`);
-  return { label: best.label, content: best.text };
+  const label = matchedLabels.join('');
+  const content = matchedContents.join('；');
+  console.log(`[Search] ✅ 选项映射成功: 题库${answer} → 考试选 ${label}，内容: "${content}"`);
+  return { label, content };
 }
 
 /** 题库更新后清除缓存，强制重建索引 */
