@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getBankMeta, saveSearchRecord } from '../services/db';
+import { getBankMeta } from '../services/db';
 import { getApiKey } from '../services/openai-ocr';
 import { batchRecognize, type OcrProgress, type OcrItemResult } from '../services/openai-ocr';
 import { searchQuestions, matchOptionLabel } from '../services/search';
-import { generateId } from '../utils/uuid';
 import ImagePicker from '../components/ImagePicker';
 import ImagePreview from '../components/ImagePreview';
 import OcrProgressBar from '../components/OcrProgress';
@@ -120,14 +119,6 @@ export default function SearchPage() {
 
       setResults(searchResults);
       setPhase('results');
-
-      // 保存搜索记录
-      saveSearchRecord({
-        id: generateId(),
-        imageDataUrls: images,
-        results: searchResults,
-        searchedAt: Date.now(),
-      }).catch(() => {});
     } catch (err) {
       console.error('[SearchPage] 搜题失败:', err);
       const msg = err instanceof Error ? err.message : String(err);
