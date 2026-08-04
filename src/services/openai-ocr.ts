@@ -20,8 +20,8 @@ const OPENROUTER_API = import.meta.env.DEV
   ? '/api/openrouter/api/v1/chat/completions'
   : 'https://openrouter.ai/api/v1/chat/completions';
 
-// Gemini 2.0 Flash：速度比 GPT-4o 快 3-5 倍，中文 OCR 能力足够
-const MODEL = 'google/gemini-2.0-flash-001';
+// Gemini 2.5 Flash：速度快、免费额度、中文 OCR 能力强
+const MODEL = 'google/gemini-2.5-flash';
 
 // 并行处理并发数
 const CONCURRENCY = 3;
