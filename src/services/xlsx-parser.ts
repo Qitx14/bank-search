@@ -21,6 +21,8 @@ const SHEET_TYPE_MAP: Record<string, SheetType> = {
   '多选': 'multiple',
   '判断题': 'judge',
   '判断': 'judge',
+  '案例分析': 'case',
+  '案例': 'case',
 };
 
 /**
@@ -137,6 +139,7 @@ export interface ParseResult {
     single: number;
     multiple: number;
     judge: number;
+    case: number;
   };
 }
 
@@ -152,7 +155,7 @@ export function parseExcelFile(file: File): Promise<ParseResult> {
 
         const allQuestions: Question[] = [];
         const allErrors: string[] = [];
-        const stats = { single: 0, multiple: 0, judge: 0 };
+        const stats = { single: 0, multiple: 0, judge: 0, case: 0 };
 
         for (const sheetName of workbook.SheetNames) {
           const { questions, errors } = parseSheet(workbook, sheetName);

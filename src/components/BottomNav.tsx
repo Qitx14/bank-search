@@ -9,6 +9,7 @@ interface NavItem {
 
 const items: NavItem[] = [
   { to: '/', label: '搜题', icon: 'search' },
+  { to: '/practice', label: '练习', icon: 'practice' },
   { to: '/library', label: '题库', icon: 'library' },
   { to: '/settings', label: '设置', icon: 'settings' },
 ];
@@ -19,6 +20,16 @@ function SearchIcon() {
       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function PracticeIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
     </svg>
   );
 }
@@ -44,6 +55,7 @@ function SettingsIcon() {
 
 const iconMap: Record<string, React.ReactNode> = {
   search: <SearchIcon />,
+  practice: <PracticeIcon />,
   library: <LibraryIcon />,
   settings: <SettingsIcon />,
 };

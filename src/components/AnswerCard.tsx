@@ -1,4 +1,5 @@
-import type { Question, SheetType } from '../types';
+import type { Question } from '../types';
+import { TYPE_LABELS, TYPE_COLORS, isMultiPickType, letterToIndex, splitAnswer } from '../utils/question-types';
 
 interface AnswerCardProps {
   question: Question;
@@ -7,28 +8,6 @@ interface AnswerCardProps {
   examAnswer?: string;
   /** 正确选项的文字内容 */
   examAnswerContent?: string;
-}
-
-const TYPE_LABELS: Record<SheetType, string> = {
-  single: '单选题',
-  multiple: '多选题',
-  judge: '判断题',
-};
-
-const TYPE_COLORS: Record<SheetType, string> = {
-  single: '#1976D2',
-  multiple: '#F59E0B',
-  judge: '#10B981',
-};
-
-/** 答案字母 → options 数组索引 */
-function letterToIndex(letter: string): number {
-  return letter.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
-}
-
-/** 拆分多选题答案，如 "ABD" → ['A','B','D'] */
-function splitAnswer(answer: string): string[] {
-  return answer.replace(/[^A-Za-z]/g, '').split('');
 }
 
 export default function AnswerCard({ question, score, examAnswer, examAnswerContent }: AnswerCardProps) {
@@ -111,8 +90,8 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
             应选
           </div>
 
-          {/* 多选题：逐条显示 A：xxx / C：xxx */}
-          {sheetType === 'multiple' ? (() => {
+          {/* 多选题/案例分析：逐条显示 A：xxx / C：xxx */}
+          {isMultiPickType(sheetType) ? (() => {
             const labels = examAnswer.split('');
             const contents = examAnswerContent.split('；');
             return labels.map((label, i) => (
@@ -235,8 +214,8 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
           </div>
         )}
 
-        {/* 多选题 */}
-        {sheetType === 'multiple' && (
+        {/* 多选题 / 案例分析 */}
+        {isMultiPickType(sheetType) && (
           <div>
             <div style={{
               font: 'var(--font-body)',
@@ -273,7 +252,7 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
           </div>
           {options.map((opt, i) => {
             const letter = String.fromCharCode(65 + i);
-            const isAnswer = sheetType === 'multiple'
+            const isAnswer = isMultiPickType(sheetType)
               ? splitAnswer(answer).includes(letter)
               : answer === letter;
 

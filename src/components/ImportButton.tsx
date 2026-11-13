@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { parseExcelFile } from '../services/xlsx-parser';
+import { parseDocxFile } from '../services/docx-parser';
 import { importQuestions, saveBankMeta, clearBank } from '../services/db';
 import { clearSearchCache } from '../services/search';
 import type { BankStats } from '../types';
@@ -19,7 +20,9 @@ export default function ImportButton({ onImported, onError }: ImportButtonProps)
 
     setLoading(true);
     try {
-      const result = await parseExcelFile(file);
+      // 按扩展名分发解析器：.docx 走 Word 解析，其余走 Excel 解析
+      const isDocx = file.name.toLowerCase().endsWith('.docx');
+      const result = isDocx ? await parseDocxFile(file) : await parseExcelFile(file);
 
       // 先清空旧题库，再写入新数据
       await clearBank();
@@ -32,7 +35,7 @@ export default function ImportButton({ onImported, onError }: ImportButtonProps)
         questionCount: result.stats,
       });
 
-      const total = result.stats.single + result.stats.multiple + result.stats.judge;
+      const total = result.stats.single + result.stats.multiple + result.stats.judge + result.stats.case;
 
       // 如果有部分错误，提示用户
       if (result.errors.length > 0) {
@@ -60,7 +63,7 @@ export default function ImportButton({ onImported, onError }: ImportButtonProps)
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.docx"
         onChange={handleFile}
         style={{ display: 'none' }}
       />
@@ -82,7 +85,7 @@ export default function ImportButton({ onImported, onError }: ImportButtonProps)
           transition: 'background 0.15s ease',
         }}
       >
-        {loading ? '正在导入...' : '选择题库文件 (.xlsx)'}
+        {loading ? '正在导入...' : '选择题库文件 (.xlsx / .docx)'}
       </button>
     </>
   );

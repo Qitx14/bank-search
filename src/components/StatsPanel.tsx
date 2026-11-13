@@ -64,6 +64,7 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
         <StatCard label="单选题" count={stats.questionCount.single} color="#1976D2" />
         <StatCard label="多选题" count={stats.questionCount.multiple} color="#F59E0B" />
         <StatCard label="判断题" count={stats.questionCount.judge} color="#10B981" />
+        <StatCard label="案例分析" count={stats.questionCount.case ?? 0} color="#8B5CF6" />
       </div>
     </div>
   );

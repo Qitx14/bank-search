@@ -21,7 +21,7 @@ export default function LibraryPage() {
         fileName: meta.fileName,
         importedAt: meta.importedAt,
         questionCount: meta.questionCount,
-        total: meta.questionCount.single + meta.questionCount.multiple + meta.questionCount.judge,
+        total: meta.questionCount.single + meta.questionCount.multiple + meta.questionCount.judge + (meta.questionCount.case ?? 0),
       });
     }
   }

@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import BottomNav from './components/BottomNav';
 import InstallGuide from './components/InstallGuide';
 import SearchPage from './pages/SearchPage';
+import PracticePage from './pages/PracticePage';
 import LibraryPage from './pages/LibraryPage';
 import SettingsPage from './pages/SettingsPage';
 
@@ -10,6 +11,7 @@ function App() {
     <>
       <Routes>
         <Route path="/" element={<SearchPage />} />
+        <Route path="/practice" element={<PracticePage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>

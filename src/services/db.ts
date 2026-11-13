@@ -40,7 +40,8 @@ export async function getQuestionCounts() {
   const single = await db.questions.where('sheetType').equals('single').count();
   const multiple = await db.questions.where('sheetType').equals('multiple').count();
   const judge = await db.questions.where('sheetType').equals('judge').count();
-  return { single, multiple, judge };
+  const cas = await db.questions.where('sheetType').equals('case').count();
+  return { single, multiple, judge, case: cas };
 }
 
 /** 获取题目总数 */

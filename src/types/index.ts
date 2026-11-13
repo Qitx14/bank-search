@@ -1,5 +1,5 @@
 /** 题型枚举 */
-export type SheetType = 'single' | 'multiple' | 'judge';
+export type SheetType = 'single' | 'multiple' | 'judge' | 'case';
 
 /** 题库中的一道题 */
 export interface Question {
@@ -8,7 +8,7 @@ export interface Question {
   questionNumber: number;    // 题号
   stem: string;              // 题干文本
   options: string[];         // 选项 ['A. xxx', 'B. xxx', ...]，判断题为空数组
-  answer: string;            // 答案：单选"A"、多选"AB"、判断"正确"/"错误"
+  answer: string;            // 答案：单选"A"、多选"AB"、案例分析"AB"、判断"正确"/"错误"
 }
 
 /** OCR 从图片中提取的单个选项 */
@@ -28,11 +28,15 @@ export interface BankMeta {
   id: string;                // 固定为 'current'
   fileName: string;          // 导入的文件名
   importedAt: number;        // 导入时间戳 (Date.now())
-  questionCount: {
-    single: number;
-    multiple: number;
-    judge: number;
-  };
+  questionCount: QuestionCounts;
+}
+
+/** 各题型题目数量 */
+export interface QuestionCounts {
+  single: number;
+  multiple: number;
+  judge: number;
+  case: number;
 }
 
 /** 单张图片的匹配结果 */
@@ -65,10 +69,6 @@ export interface BankStats {
   hasBank: boolean;
   fileName: string;
   importedAt: number;
-  questionCount: {
-    single: number;
-    multiple: number;
-    judge: number;
-  };
+  questionCount: QuestionCounts;
   total: number;
 }
