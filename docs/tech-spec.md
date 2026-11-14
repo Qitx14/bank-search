@@ -12,7 +12,7 @@
 | 本地 OCR | Tesseract.js（chi_sim） | 5.x | 本地识别备用实现（`services/ocr.ts`，当前未接入搜题流程） |
 | 搜索 | Fuse.js | 7.x | 模糊文本匹配（threshold 0.4 + bigram 回退） |
 | 数据库 | Dexie.js | 4.x | IndexedDB 封装 |
-| 表格解析 | SheetJS (xlsx) | 0.20.x | .xlsx 读取 |
+| 表格解析 | SheetJS (xlsx) | 0.20.x | .xlsx / .xls 读取（.xls 兼容 WPS 老格式） |
 | Word 解析 | mammoth | 1.13.x | .docx 转 HTML（引浏览器包 `mammoth/mammoth.browser.js`，类型声明见 `src/types/mammoth.d.ts`） |
 | PWA | vite-plugin-pwa | — | Service Worker 生成 |
 

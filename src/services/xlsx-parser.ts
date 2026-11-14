@@ -2,10 +2,10 @@ import * as XLSX from 'xlsx';
 import type { Question, SheetType } from '../types';
 import { generateId } from '../utils/uuid';
 
-/** 列名映射：把常见的列名变体统一到标准字段 */
+/** 列名映射：把常见的列名变体统一到标准字段（顺序即优先级） */
 const COLUMN_ALIASES: Record<string, string[]> = {
   questionNumber: ['题号', '序号', '编号', '类型编号', '题目编号', 'id', 'ID', 'No', 'no', 'number'],
-  stem: ['题目', '题干', '题目内容', '问题', '试题', 'question', 'stem', 'title'],
+  stem: ['题干', '题目', '题目内容', '问题', '试题', 'question', 'stem', 'title'],
   answer: ['答案', '正确答案', '标准答案', '客观题答案', 'answer', '结果'],
 };
 
@@ -28,17 +28,23 @@ const SHEET_TYPE_MAP: Record<string, SheetType> = {
 /**
  * 在表头行中找到与目标字段匹配的列索引
  * 优先精确匹配，回退到包含匹配
+ * @param excludePatterns 包含这些文字的列不参与匹配（如题干不应匹配「题目解析」列）
  */
-function findColumn(headers: string[], target: string): number {
+function findColumn(headers: string[], target: string, excludePatterns: string[] = []): number {
   const aliases = COLUMN_ALIASES[target] || [target];
+  const isClean = (h: string) => !excludePatterns.some(p => h.includes(p));
+
   for (const alias of aliases) {
     // 精确匹配
-    const exact = headers.findIndex(h => h.trim() === alias);
+    const exact = headers.findIndex(h => isClean(h.trim()) && h.trim() === alias);
     if (exact >= 0) return exact;
   }
   for (const alias of aliases) {
     // 包含匹配
-    const partial = headers.findIndex(h => h.trim().includes(alias));
+    const partial = headers.findIndex(h => {
+      const t = h.trim();
+      return isClean(t) && t.includes(alias);
+    });
     if (partial >= 0) return partial;
   }
   return -1;
@@ -66,6 +72,14 @@ function detectSheetType(sheetName: string): SheetType | null {
   return null;
 }
 
+/** 判断题答案归一化为「正确」/「错误」，无法识别时保留原文（与 docx 解析一致） */
+function normalizeJudgeAnswer(raw: string): string {
+  const t = raw.trim().toUpperCase();
+  if (['A', '正确', '√', '对', 'T', 'TRUE', '是'].includes(t)) return '正确';
+  if (['B', '错误', '×', '错', 'F', 'FALSE', '否'].includes(t)) return '错误';
+  return raw.trim();
+}
+
 
 /** 解析单个 Sheet 为题目列表 */
 function parseSheet(workbook: XLSX.WorkBook, sheetName: string): { questions: Question[]; errors: string[] } {
@@ -90,7 +104,8 @@ function parseSheet(workbook: XLSX.WorkBook, sheetName: string): { questions: Qu
   const headers = data[0].map(h => String(h ?? ''));
 
   const qNumIdx = findColumn(headers, 'questionNumber');
-  const stemIdx = findColumn(headers, 'stem');
+  // 题干列排除「解析」「分析」等干扰列（如《反假货币题库》的「题目解析（选填）」列）
+  const stemIdx = findColumn(headers, 'stem', ['解析', '分析']);
   const answerIdx = findColumn(headers, 'answer');
   const optionIndices = findOptionColumns(headers);
 
@@ -110,13 +125,16 @@ function parseSheet(workbook: XLSX.WorkBook, sheetName: string): { questions: Qu
     if (!stem) continue; // 跳过空行
 
     const questionNumber = qNumIdx >= 0 ? parseInt(String(row[qNumIdx] ?? ''), 10) || rowIdx : rowIdx;
-    const answer = String(row[answerIdx] ?? '').trim();
+    const rawAnswer = String(row[answerIdx] ?? '').trim();
     const options = optionIndices.map(i => String(row[i] ?? '').trim()).filter(Boolean);
 
-    if (!answer) {
+    if (!rawAnswer) {
       errors.push(`Sheet「${sheetName}」第 ${rowIdx + 1} 行：答案为空，跳过`);
       continue;
     }
+
+    // 判断题答案归一化：A → 正确，B → 错误
+    const answer = sheetType === 'judge' ? normalizeJudgeAnswer(rawAnswer) : rawAnswer;
 
     questions.push({
       id: generateId(),
@@ -143,36 +161,42 @@ export interface ParseResult {
   };
 }
 
-/** 主解析函数：读取 .xlsx 文件，返回所有题目 */
+/**
+ * 从二进制数据解析题库（File 流程与 Node 脚本共用）
+ * @param data .xls / .xlsx 文件二进制数据
+ */
+export function parseExcelBuffer(data: ArrayBuffer | Uint8Array): ParseResult {
+  const workbook = XLSX.read(data, { type: 'array' });
+
+  const allQuestions: Question[] = [];
+  const allErrors: string[] = [];
+  const stats = { single: 0, multiple: 0, judge: 0, case: 0 };
+
+  for (const sheetName of workbook.SheetNames) {
+    const { questions, errors } = parseSheet(workbook, sheetName);
+    allQuestions.push(...questions);
+    allErrors.push(...errors);
+  }
+
+  for (const q of allQuestions) {
+    stats[q.sheetType]++;
+  }
+
+  if (allQuestions.length === 0) {
+    throw new Error(allErrors.join('\n') || '未能从文件中解析到任何题目');
+  }
+
+  return { questions: allQuestions, errors: allErrors, stats };
+}
+
+/** 主解析函数：读取 .xls / .xlsx 文件，返回所有题目 */
 export function parseExcelFile(file: File): Promise<ParseResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-
-        const allQuestions: Question[] = [];
-        const allErrors: string[] = [];
-        const stats = { single: 0, multiple: 0, judge: 0, case: 0 };
-
-        for (const sheetName of workbook.SheetNames) {
-          const { questions, errors } = parseSheet(workbook, sheetName);
-          allQuestions.push(...questions);
-          allErrors.push(...errors);
-        }
-
-        for (const q of allQuestions) {
-          stats[q.sheetType]++;
-        }
-
-        if (allQuestions.length === 0) {
-          reject(new Error(allErrors.join('\n') || '未能从文件中解析到任何题目'));
-          return;
-        }
-
-        resolve({ questions: allQuestions, errors: allErrors, stats });
+        resolve(parseExcelBuffer(e.target!.result as ArrayBuffer));
       } catch (err) {
         reject(new Error(`文件解析失败：${err instanceof Error ? err.message : '未知错误'}`));
       }
