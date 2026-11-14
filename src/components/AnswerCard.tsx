@@ -8,9 +8,11 @@ interface AnswerCardProps {
   examAnswer?: string;
   /** 正确选项的文字内容 */
   examAnswerContent?: string;
+  /** 展示完整题干（默认截短 120 字） */
+  fullStem?: boolean;
 }
 
-export default function AnswerCard({ question, score, examAnswer, examAnswerContent }: AnswerCardProps) {
+export default function AnswerCard({ question, score, examAnswer, examAnswerContent, fullStem }: AnswerCardProps) {
   const { sheetType, stem, answer, options } = question;
   const typeLabel = TYPE_LABELS[sheetType];
   const accentColor = TYPE_COLORS[sheetType];
@@ -70,7 +72,7 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
             color: 'var(--color-text-primary)',
             lineHeight: 1.6,
           }}>
-            {stem.length > 120 ? stem.slice(0, 120) + '...' : stem}
+            {fullStem ? stem : stem.length > 120 ? stem.slice(0, 120) + '...' : stem}
           </div>
         </div>
 
@@ -114,13 +116,16 @@ export default function AnswerCard({ question, score, examAnswer, examAnswerCont
               }}>
                 {examAnswer}
               </div>
-              <div style={{
-                font: 'var(--font-body)',
-                color: 'var(--color-text-primary)',
-                lineHeight: 1.5,
-              }}>
-                {examAnswerContent}
-              </div>
+              {/* 判断题「正确」即内容，避免重复显示 */}
+              {examAnswerContent && examAnswerContent !== examAnswer && (
+                <div style={{
+                  font: 'var(--font-body)',
+                  color: 'var(--color-text-primary)',
+                  lineHeight: 1.5,
+                }}>
+                  {examAnswerContent}
+                </div>
+              )}
             </>
           )}
         </div>

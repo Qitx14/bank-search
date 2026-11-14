@@ -48,7 +48,7 @@ export default function OcrProgress({ progress }: OcrProgressProps) {
         color: 'var(--color-text-secondary)',
         textAlign: 'center',
       }}>
-        {current}/{total} 张 — {percent}%
+        {current}/{total} — {percent}%
       </div>
 
       {/* 每张图片状态列表 */}

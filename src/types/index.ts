@@ -23,6 +23,11 @@ export interface OcrParsedResult {
   options: OcrOption[];
 }
 
+/** 一张图片中识别出的全部题目（一图多题拆分结果） */
+export interface OcrParseResult {
+  questions: OcrParsedResult[];
+}
+
 /** 题库元数据 */
 export interface BankMeta {
   id: string;                // 固定为 'current'
@@ -45,9 +50,10 @@ export interface MatchItem {
   score: number;             // 匹配分数 0~1，越高越相似
 }
 
-/** 单张图片的识别与搜索结果 */
+/** 单道题的识别与搜索结果 */
 export interface SearchResult {
   imageIndex: number;        // 对应第几张图片（从 0 开始）
+  questionIndex: number;     // 该图片中的第几题（从 0 开始）
   imageDataUrl: string;      // 图片 base64
   extractedText: string;     // OCR 提取的文字
   matches: MatchItem[];      // 匹配候选（按相似度降序）

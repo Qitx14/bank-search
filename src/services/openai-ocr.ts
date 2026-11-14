@@ -1,3 +1,5 @@
+import type { OcrParseResult } from '../types';
+
 /** OCR 识别进度 */
 export interface OcrProgress {
   current: number;
@@ -8,12 +10,12 @@ export interface OcrProgress {
 /** 单张图片的识别结果 */
 export interface OcrItemResult {
   text: string;              // OCR 原始返回文本
-  parsed?: {                 // 解析后的结构化数据
-    stem: string;
-    options: { label: string; text: string }[];
-  };
+  parsed?: OcrParseResult;   // 解析后的结构化数据（一张图拆出的多道题）
   error?: string;
 }
+
+/** 一张图片最多识别的题目数（限制 token 消耗与识别质量） */
+export const MAX_QUESTIONS_PER_IMAGE = 5;
 
 // 开发环境走 Vite 代理（避免手机端区域限制），生产环境直连
 const OPENROUTER_API = import.meta.env.DEV
@@ -122,7 +124,13 @@ async function recognizeImage(
             content: [
               {
                 type: 'text',
-                text: '请识别图片中的考试题目。严格返回 JSON 格式（不要 markdown 代码块，不要多余文字）：\n{"stem":"题目题干","options":[{"label":"A","text":"选项A完整文字"},{"label":"B","text":"选项B完整文字"}]}\n只提取题目和选项，忽略解析、答案标记、页码等无关内容。判断题 options 为空数组 []。',
+                text: `请识别图片中的全部考试题目（最多 ${MAX_QUESTIONS_PER_IMAGE} 道）。严格返回 JSON 格式（不要 markdown 代码块，不要多余文字）：
+{"questions":[{"stem":"第1题题干","options":[{"label":"A","text":"选项A完整文字"},{"label":"B","text":"选项B完整文字"}]},{"stem":"第2题题干","options":[]}]}
+规则：
+1. 按题目在图片中从上到下的顺序排列，每道题一个对象
+2. 每题包含完整题干和全部选项；判断题 options 为空数组 []
+3. 只提取题目和选项，忽略解析、答案标记、页码、水印等无关内容
+4. 若图片中题目超过 ${MAX_QUESTIONS_PER_IMAGE} 道，只返回前 ${MAX_QUESTIONS_PER_IMAGE} 道；若只有 1 道题，数组只有 1 个元素`,
               },
               {
                 type: 'image_url',
@@ -131,7 +139,7 @@ async function recognizeImage(
             ],
           },
         ],
-        max_tokens: 800,
+        max_tokens: 3000,
         temperature: 0,
       }),
     });
@@ -181,21 +189,41 @@ async function recognizeImage(
 
   console.log(`[OCR] 清理后文字: "${text.slice(0, 200)}..."`);
 
-  // 尝试解析 JSON
+  // 尝试解析 JSON（新格式：questions 数组；兼容旧格式：单题对象 / 裸数组）
   let parsed: OcrItemResult['parsed'] | undefined;
   try {
     const obj = JSON.parse(text);
-    if (obj && typeof obj.stem === 'string') {
-      parsed = {
-        stem: obj.stem.trim(),
-        options: Array.isArray(obj.options)
-          ? obj.options.map((o: any) => ({
+
+    let rawQuestions: any[] = [];
+    if (Array.isArray(obj?.questions)) {
+      rawQuestions = obj.questions;              // 新格式 { questions: [...] }
+    } else if (Array.isArray(obj)) {
+      rawQuestions = obj;                        // 兜底：裸数组
+    } else if (obj && typeof obj.stem === 'string') {
+      rawQuestions = [obj];                      // 旧格式：单题对象
+    }
+
+    const questions: OcrParseResult['questions'] = [];
+    for (const q of rawQuestions) {
+      if (!q || typeof q.stem !== 'string' || !q.stem.trim()) continue; // 跳过空题
+      questions.push({
+        stem: q.stem.trim(),
+        options: Array.isArray(q.options)
+          ? q.options.map((o: any) => ({
               label: String(o.label || '').trim(),
               text: String(o.text || '').trim(),
             }))
           : [],
-      };
-      console.log(`[OCR] JSON 解析成功: stem="${parsed.stem.slice(0, 60)}", ${parsed.options.length} 个选项`);
+      });
+      if (questions.length >= MAX_QUESTIONS_PER_IMAGE) break;
+    }
+
+    if (questions.length > 0) {
+      parsed = { questions };
+      console.log(`[OCR] JSON 解析成功: 拆出 ${questions.length} 道题`);
+      questions.forEach((q, i) => {
+        console.log(`[OCR]   第${i + 1}题 stem="${q.stem.slice(0, 50)}", ${q.options.length} 个选项`);
+      });
     }
   } catch {
     console.warn('[OCR] AI 返回的不是有效 JSON，使用原始文本作为题干');

@@ -4,13 +4,13 @@
 
 | 层级 | 技术 | 版本 | 用途 |
 |------|------|------|------|
-| 框架 | React | 18.x | UI 构建 |
+| 框架 | React | 19.x | UI 构建 |
 | 语言 | TypeScript | 5.x | 类型安全 |
-| 构建 | Vite | 5.x | 开发/打包 |
-| 路由 | React Router | 6.x | 页面导航 |
-| OCR | Tesseract.js | 5.x | 图片文字识别 |
-| 中文语言包 | chi_sim | — | OCR 中文支持 |
-| 搜索 | Fuse.js | 7.x | 模糊文本匹配 |
+| 构建 | Vite | 8.x | 开发/打包 |
+| 路由 | React Router | 7.x | 页面导航（`BrowserRouter basename` 与 vite base `/bank-search/` 一致） |
+| OCR | OpenRouter API（Gemini 2.5 Flash） | — | AI 图片识别（一图多题拆分），v1.2 起为搜题主链路；开发环境走 Vite 代理避免手机区域限制 |
+| 本地 OCR | Tesseract.js（chi_sim） | 5.x | 本地识别备用实现（`services/ocr.ts`，当前未接入搜题流程） |
+| 搜索 | Fuse.js | 7.x | 模糊文本匹配（threshold 0.4 + bigram 回退） |
 | 数据库 | Dexie.js | 4.x | IndexedDB 封装 |
 | 表格解析 | SheetJS (xlsx) | 0.20.x | .xlsx 读取 |
 | Word 解析 | mammoth | 1.13.x | .docx 转 HTML（引浏览器包 `mammoth/mammoth.browser.js`，类型声明见 `src/types/mammoth.d.ts`） |
@@ -34,13 +34,14 @@ src/
 │   ├── ImagePreview.tsx     # 图片预览网格
 │   ├── OcrProgress.tsx      # OCR 进度条
 │   ├── AnswerCard.tsx       # 答案卡片
-│   ├── ResultList.tsx       # 批量结果列表
+│   ├── QuestionPager.tsx    # 结果分页滑动组件（v1.2 新增）
 │   ├── ImportButton.tsx     # 题库导入按钮
 │   └── StatsPanel.tsx       # 题库统计面板
 ├── services/
 │   ├── db.ts                # Dexie 数据库定义与操作
-│   ├── ocr.ts               # Tesseract.js OCR 封装
-│   ├── search.ts            # Fuse.js 搜索封装
+│   ├── ocr.ts               # Tesseract.js 本地 OCR 封装（备用，未接入搜题流程）
+│   ├── openai-ocr.ts        # OpenRouter AI OCR（一图多题拆分，v1.2 主链路）
+│   ├── search.ts            # Fuse.js 搜索封装 + 选项映射
 │   ├── xlsx-parser.ts       # SheetJS 题库解析
 │   ├── docx-parser.ts       # Word 题库解析（v1.1 新增）
 │   └── practice.ts          # 练习：抽题/判题/答案标准化（v1.1 新增）
@@ -83,11 +84,26 @@ interface SearchRecord {
   searchedAt: number;
 }
 
-// 搜索结果
+// OCR 结构化识别：一张图拆出的所有题目（v1.2）
+interface OcrParseResult {
+  questions: OcrParsedResult[];   // 最多 5 道（MAX_QUESTIONS_PER_IMAGE）
+}
+
+interface OcrParsedResult {
+  stem: string;                   // 题干
+  options: OcrOption[];           // 选项（判断题为空数组）
+}
+
+// 搜索结果（v1.2：按「题」而非「图」组织）
 interface SearchResult {
   imageIndex: number;       // 对应第几张图片
+  questionIndex: number;    // 该图片中的第几题（从 0 开始）
+  imageDataUrl: string;     // 图片 base64
   extractedText: string;    // OCR 提取的文字
-  matches: MatchItem[];     // 匹配结果（按相似度排序）
+  matches: MatchItem[];     // 匹配结果（按相似度排序，展示只取最高分）
+  error?: string;           // 识别失败时的错误信息
+  examAnswer?: string;      // 考试时应选的选项字母（选项映射结果）
+  examAnswerContent?: string; // 正确选项的文字内容
 }
 
 interface MatchItem {
@@ -95,6 +111,13 @@ interface MatchItem {
   score: number;            // 匹配分数 0-1
 }
 ```
+
+## 搜题一图多题设计（v1.2）
+
+- **AI 识别**（`src/services/openai-ocr.ts`）：提示词要求返回 `{"questions":[{stem, options}, ...]}`，按图片中从上到下排序，每张最多 5 道（`MAX_QUESTIONS_PER_IMAGE = 5`，限制 token 与识别质量）；`max_tokens` 800 → 3000；解析兼容旧单题格式与裸数组
+- **逐题搜索**：OCR 结果按 `(imageIndex, questionIndex)` 展开成题目列表，逐题走 `searchQuestions()`（本地 Fuse，毫秒级）+ `matchOptionLabel()` 选项映射；每题只展示匹配度最高的一条
+- **回退策略**：AI 未返回结构化 JSON 时，整图原始文字作为单题搜索（与旧版行为一致）；单图识别失败记为一条错误结果，不阻塞其他图片
+- **结果分页 UI**（`src/components/QuestionPager.tsx`）：CSS `scroll-snap-type: x mandatory` 原生滑动（零依赖），每页一道题；`onScroll` 计算当前页同步数字导航；导航点击 `scrollTo({behavior:'smooth'})` 跳页；当前页数字自动 `scrollIntoView`；结果页为固定高度 flex 布局（`.results-page`，`100dvh`），页面自身不滚动
 
 ## docx 题库格式规范（v1.1）
 
@@ -140,11 +163,11 @@ D. 公众的银行
 
 ## 关键约束
 - 题库支持最大 10,000 题
-- OCR 单张图片处理时间 < 30 秒
-- 一次批量最多 9 张图片
+- OCR 单张图片处理时间 < 30 秒（AI OCR 并发 3 张，压缩后 ~150KB/张）
+- 一次批量最多 10 张图片，每张最多识别 5 道题（v1.2）
 - 图片存储在 IndexedDB（转为 base64）
 - 所有处理在浏览器主线程外（Web Worker / Tesseract 自带 Worker）
 
 ---
 
-> 版本：v1.1 | 日期：2026-11-13 | 变更：docx 导入 + 练习功能
+> 版本：v1.2 | 日期：2026-11-14 | 变更：搜题一图多题 + 结果分页滑动

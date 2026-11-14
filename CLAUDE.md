@@ -37,10 +37,11 @@
 - ❌ 不要写英文 UI 文案（目标用户是中文用户）
 
 ### 技术关键点
-- OCR 使用 Tesseract.js `chi_sim` 语言包，在 Web Worker 中运行
-- 模糊搜索使用 Fuse.js，`threshold: 0.4`
+- OCR 主链路为 AI 识别（OpenRouter Gemini 2.5 Flash，用户自配 API Key），一张图最多识别 5 道题（`MAX_QUESTIONS_PER_IMAGE`）；Tesseract.js `chi_sim` 本地识别为备用实现（`services/ocr.ts`，未接入搜题流程）
+- 模糊搜索使用 Fuse.js，`threshold: 0.4`，另有 bigram 回退匹配
 - 题库存储在 IndexedDB（通过 Dexie.js 操作），离线下可读
 - 图片以 base64 Data URL 存储在搜索记录中
+- 路由 `BrowserRouter basename` 与 vite base `/bank-search/` 一致（GitHub Pages 子路径部署）
 - PWA Service Worker 缓存策略：应用 Shell 预缓存，运行时缓存图片
 
 ### 测试方式
@@ -55,3 +56,4 @@
 - **Phase 2**：核心功能 ✅
 - **Phase 3**：完善发布 ✅（线上：https://Qitx14.github.io/bank-search/）
 - **Phase 4**：练习功能 ✅（2026-11-13 完成，四种题型：单选/多选/判断/案例分析；docx 导入）
+- **Phase 5**：拍照搜题一图多题 🔧（2026-11-14 开发完成，待真机测试后上线：一张照片最多识别 5 道题、逐题搜索、结果页左右滑动分页 + 数字导航；附带修复路由 basename bug）

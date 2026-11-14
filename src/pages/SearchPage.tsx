@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { getBankMeta } from '../services/db';
 import { getApiKey } from '../services/openai-ocr';
-import { batchRecognize, type OcrProgress, type OcrItemResult } from '../services/openai-ocr';
+import { batchRecognize, MAX_QUESTIONS_PER_IMAGE, type OcrProgress, type OcrItemResult } from '../services/openai-ocr';
 import { searchQuestions, matchOptionLabel } from '../services/search';
 import ImagePicker from '../components/ImagePicker';
 import ImagePreview from '../components/ImagePreview';
 import OcrProgressBar from '../components/OcrProgress';
-import AnswerCard from '../components/AnswerCard';
-import type { SearchResult, MatchItem } from '../types';
+import QuestionPager from '../components/QuestionPager';
+import type { SearchResult, MatchItem, OcrParsedResult } from '../types';
 
 type Phase = 'select' | 'recognizing' | 'results';
 
@@ -56,67 +56,86 @@ export default function SearchPage() {
     setError(null);
 
     try {
-      // Step 1: AI OCR 识别
+      // Step 1: AI OCR 识别（每张图拆出最多 5 道题）
       const ocrResults: OcrItemResult[] = await batchRecognize(images, apiKey, setOcrProgress);
 
-      // Step 2: 逐条搜索
+      // Step 2: 展开题目，逐题搜索（每题保留匹配度最高的结果）
       const searchResults: SearchResult[] = [];
       for (let i = 0; i < ocrResults.length; i++) {
         const ocr = ocrResults[i];
-        let matches: MatchItem[] = [];
-
         console.log(`[SearchPage] ===== 第 ${i + 1} 张图片 =====`);
-        console.log(`[SearchPage] OCR 提取文字 (${ocr.text.length} 字):`);
-        console.log(`[SearchPage] "${ocr.text}"`);
-        if (ocr.parsed) {
-          console.log(`[SearchPage] 结构化解析: stem="${ocr.parsed.stem}", ${ocr.parsed.options.length} 个选项`);
-        }
         if (ocr.error) {
           console.warn(`[SearchPage] OCR 错误: ${ocr.error}`);
         }
 
-        // 搜索用题干：优先用 parsed.stem（更干净），回退到原始 text
-        const searchText = ocr.parsed?.stem || ocr.text;
+        // 识别失败：整张图记为一道错误题
+        if (ocr.error) {
+          searchResults.push({
+            imageIndex: i,
+            questionIndex: 0,
+            imageDataUrl: images[i],
+            extractedText: '',
+            matches: [],
+            error: ocr.error,
+          });
+          continue;
+        }
 
-        if (!ocr.error && searchText) {
-          try {
-            matches = await searchQuestions(searchText);
-            console.log(`[SearchPage] 匹配到 ${matches.length} 条结果`);
+        // 该图拆出的题目；AI 未结构化时回退为原始文字单题
+        const rawQuestions: OcrParsedResult[] =
+          ocr.parsed && ocr.parsed.questions.length > 0
+            ? ocr.parsed.questions
+            : [{ stem: ocr.text, options: [] }];
+        console.log(`[SearchPage] 拆出 ${rawQuestions.length} 道题`);
 
-            // 选项映射：找考试时应选哪个字母
-            if (matches.length > 0 && ocr.parsed?.options?.length) {
-              const examInfo = matchOptionLabel(matches[0].question, ocr.parsed.options);
-              if (examInfo) {
-                searchResults.push({
-                  imageIndex: i,
-                  imageDataUrl: images[i],
-                  extractedText: ocr.parsed.stem,
-                  matches,
-                  examAnswer: examInfo.label,
-                  examAnswerContent: examInfo.content,
-                });
-                continue; // 已 push，跳过下面的 push
+        for (let qi = 0; qi < rawQuestions.length; qi++) {
+          const q = rawQuestions[qi];
+          setOcrProgress({
+            current: qi + 1,
+            total: rawQuestions.length,
+            status: `正在匹配题库 第 ${qi + 1}/${rawQuestions.length} 题...`,
+          });
+
+          const searchText = (q.stem || '').trim();
+          let matches: MatchItem[] = [];
+          let examAnswer: string | undefined;
+          let examAnswerContent: string | undefined;
+
+          if (searchText) {
+            try {
+              matches = await searchQuestions(searchText);
+              console.log(`[SearchPage] 第 ${i + 1} 张·第 ${qi + 1} 题 匹配到 ${matches.length} 条`);
+
+              // 选项映射：找考试时应选哪个字母（基于匹配度最高的那条）
+              if (matches.length > 0 && q.options.length > 0) {
+                const examInfo = matchOptionLabel(matches[0].question, q.options);
+                if (examInfo) {
+                  examAnswer = examInfo.label;
+                  examAnswerContent = examInfo.content;
+                }
               }
+            } catch (searchErr) {
+              console.error(`[SearchPage] 第 ${i + 1} 张·第 ${qi + 1} 题搜索异常:`, searchErr);
             }
-          } catch (searchErr) {
-            console.error(`[SearchPage] 搜索异常:`, searchErr);
           }
-        }
 
-        if (!ocr.error && ocr.text && matches.length === 0) {
-          console.warn(`[SearchPage] ⚠️ 第 ${i + 1} 张图片未匹配到任何题目！`);
-          console.warn(`[SearchPage] OCR 文字: "${ocr.text}"`);
-        }
+          if (searchText && matches.length === 0) {
+            console.warn(`[SearchPage] ⚠️ 第 ${i + 1} 张·第 ${qi + 1} 题未匹配到任何题目！`);
+          }
 
-        searchResults.push({
-          imageIndex: i,
-          imageDataUrl: images[i],
-          extractedText: ocr.text,
-          matches,
-          error: ocr.error,
-        });
+          searchResults.push({
+            imageIndex: i,
+            questionIndex: qi,
+            imageDataUrl: images[i],
+            extractedText: searchText,
+            matches,
+            examAnswer,
+            examAnswerContent,
+          });
+        }
       }
 
+      console.log(`[SearchPage] 共 ${searchResults.length} 道题，搜索完成`);
       setResults(searchResults);
       setPhase('results');
     } catch (err) {
@@ -137,171 +156,53 @@ export default function SearchPage() {
 
   // ===== 结果页 =====
   if (phase === 'results') {
-    const successCount = results.filter(r => !r.error).length;
-    const matchedCount = results.filter(r => r.matches.length > 0).length;
+    const matchedCount = results.filter(r => !r.error && r.matches.length > 0).length;
+
+    // 答案汇总：每 5 题一行
+    const answers = results.map((r) => {
+      if (r.error || r.matches.length === 0) return '?';
+      return r.examAnswer || r.matches[0].question.answer;
+    });
+    const rows: { range: string; answers: string[] }[] = [];
+    for (let i = 0; i < answers.length; i += 5) {
+      const chunk = answers.slice(i, i + 5);
+      const start = i + 1;
+      const end = i + chunk.length;
+      rows.push({
+        range: start === end ? `${start}` : `${start}-${end}`,
+        answers: chunk,
+      });
+    }
 
     return (
-      <div className="page">
+      <div className="page results-page">
         <div className="page-header">
           <h1 className="page-title">搜题结果</h1>
-          <p className="page-subtitle">
-            {successCount}/{results.length} 张识别成功，{matchedCount} 张匹配到题目
-          </p>
+          <p className="page-subtitle">共 {results.length} 题，{matchedCount} 题匹配到答案</p>
         </div>
 
         {/* 答案汇总 */}
-        {(() => {
-          // 收集每道题的答案
-          const answers = results.map((r) => {
-            if (r.error || r.matches.length === 0) return '?';
-            return r.examAnswer || r.matches[0].question.answer;
-          });
-
-          // 每 5 个一组
-          const rows: { range: string; answers: string[] }[] = [];
-          for (let i = 0; i < answers.length; i += 5) {
-            const chunk = answers.slice(i, i + 5);
-            const start = i + 1;
-            const end = i + chunk.length;
-            rows.push({
-              range: start === end ? `${start}` : `${start}-${end}`,
-              answers: chunk,
-            });
-          }
-
-          if (rows.length === 0) return null;
-
-          return (
-            <div style={{
-              background: 'var(--color-surface)',
-              borderRadius: 'var(--radius-md)',
-              boxShadow: 'var(--shadow-card)',
-              padding: 'var(--space-md)',
-              marginBottom: 'var(--space-lg)',
-            }}>
-              <div style={{
-                font: 'var(--font-small)',
-                color: 'var(--color-text-secondary)',
-                marginBottom: 'var(--space-sm)',
-              }}>
-                答案汇总
+        {rows.length > 0 && (
+          <div className="results-summary">
+            <div className="results-summary__label">答案汇总</div>
+            {rows.map((row) => (
+              <div key={row.range} className="results-summary__row">
+                <span className="results-summary__range">{row.range}:</span>
+                <span className="results-summary__answers">{row.answers.join('  ')}</span>
               </div>
-              {rows.map((row) => (
-                <div key={row.range} style={{
-                  display: 'flex',
-                  gap: 'var(--space-sm)',
-                  padding: 'var(--space-xs) 0',
-                  font: 'var(--font-body)',
-                  alignItems: 'baseline',
-                }}>
-                  <span style={{
-                    color: 'var(--color-text-secondary)',
-                    font: 'var(--font-caption)',
-                    whiteSpace: 'nowrap',
-                    minWidth: 48,
-                  }}>
-                    {row.range}:
-                  </span>
-                  <span style={{
-                    color: 'var(--color-success)',
-                    fontWeight: 700,
-                    letterSpacing: 2,
-                    wordBreak: 'break-all',
-                  }}>
-                    {row.answers.join('  ')}
-                  </span>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-
-        {results.map((item) => (
-          <div key={item.imageIndex} style={{ marginBottom: 'var(--space-lg)' }}>
-            {/* 图片缩略图 + OCR 文字 */}
-            <div style={{
-              display: 'flex',
-              gap: 'var(--space-md)',
-              marginBottom: 'var(--space-sm)',
-              alignItems: 'flex-start',
-            }}>
-              <img
-                src={item.imageDataUrl}
-                alt={`第 ${item.imageIndex + 1} 张`}
-                style={{
-                  width: 64,
-                  height: 85,
-                  objectFit: 'cover',
-                  borderRadius: 'var(--radius-sm)',
-                  flexShrink: 0,
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  font: 'var(--font-small)',
-                  color: 'var(--color-primary)',
-                  marginBottom: 'var(--space-xs)',
-                }}>
-                  第 {item.imageIndex + 1} 张
-                </div>
-                {item.error ? (
-                  <div style={{
-                    font: 'var(--font-caption)',
-                    color: 'var(--color-error)',
-                  }}>
-                    {item.error}
-                  </div>
-                ) : (
-                  <div style={{
-                    font: 'var(--font-caption)',
-                    color: 'var(--color-text-secondary)',
-                    background: '#F8FAFC',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: 'var(--space-xs) var(--space-sm)',
-                    maxHeight: 80,
-                    overflow: 'hidden',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}>
-                    {item.extractedText || '(未识别到文字)'}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 匹配结果 */}
-            {!item.error && item.matches.length > 0 ? (
-              [item.matches[0]].map((match, mIdx) => (
-                <div key={mIdx} style={{ marginTop: 'var(--space-sm)' }}>
-                  <AnswerCard
-                    question={match.question}
-                    score={match.score}
-                    examAnswer={item.examAnswer}
-                    examAnswerContent={item.examAnswerContent}
-                  />
-                </div>
-              ))
-            ) : !item.error ? (
-              <div style={{
-                textAlign: 'center',
-                padding: 'var(--space-lg)',
-                background: 'var(--color-surface)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-text-secondary)',
-                font: 'var(--font-caption)',
-              }}>
-                未匹配到题目
-              </div>
-            ) : null}
+            ))}
           </div>
-        ))}
+        )}
+
+        {/* 分页滑动区：左右滑动看每道题 */}
+        <QuestionPager results={results} />
 
         {/* 操作按钮 */}
-        <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
+        <div className="results-actions">
           <button
             onClick={handleReset}
             style={{
-              flex: 1,
+              width: '100%',
               height: 48,
               borderRadius: 'var(--radius-md)',
               background: 'var(--color-surface)',
@@ -313,7 +214,6 @@ export default function SearchPage() {
             重新搜题
           </button>
         </div>
-        <div style={{ height: 'var(--space-2xl)' }} />
       </div>
     );
   }
@@ -324,7 +224,7 @@ export default function SearchPage() {
       <div className="page">
         <div className="page-header">
           <h1 className="page-title">识别中...</h1>
-          <p className="page-subtitle">请勿关闭页面，正在识别题目文字</p>
+          <p className="page-subtitle">请勿关闭页面，正在识别题目并匹配答案</p>
         </div>
         <OcrProgressBar progress={ocrProgress} />
         <div style={{ height: 'var(--space-2xl)' }} />
@@ -337,7 +237,7 @@ export default function SearchPage() {
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">搜题</h1>
-        <p className="page-subtitle">拍照或从相册选择题目图片，自动匹配答案</p>
+        <p className="page-subtitle">拍一张可含多道题的试卷照片，自动拆题并匹配答案</p>
       </div>
 
       {/* 题库未导入提示 */}
@@ -399,7 +299,7 @@ export default function SearchPage() {
             color: 'var(--color-text-secondary)',
             marginBottom: 'var(--space-lg)',
           }}>
-            一次最多拍摄 {MAX_IMAGES} 张题目图片
+            一次最多拍摄 {MAX_IMAGES} 张，每张最多识别 {MAX_QUESTIONS_PER_IMAGE} 道题
           </p>
           <ImagePicker
             currentCount={0}

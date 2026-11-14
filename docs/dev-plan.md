@@ -210,4 +210,42 @@
 
 ---
 
-> 版本：v1.1 | 日期：2026-11-13
+## Phase 5：拍照搜题一图多题（v1.2，2026-11-14 新增）
+
+> 需求来源：FR-2/FR-3 v1.2。旧版每张图片只识别一道题；升级为一张照片可含多道题，AI 自动拆分、逐题搜索；结果页改为左右滑动分页 + 数字导航（类似市面搜题 App）。
+
+### 步骤 5.1 — AI OCR 一图多题识别 ✅
+- **做什么**：OCR 提示词改为识别图中所有题目（最多 5 道）返回 questions 数组；解析兼容旧单题格式
+- **涉及文件**：
+  - `src/services/openai-ocr.ts` — 提示词 / `MAX_QUESTIONS_PER_IMAGE = 5` / max_tokens 800→3000 / 解析逻辑
+  - `src/types/index.ts` — 新增 `OcrParseResult`；`SearchResult` 增加 `questionIndex`
+- **验收**：一张含多题的图片返回 ≤5 个独立题目对象；旧格式兼容
+
+### 步骤 5.2 — 逐题搜索逻辑 ✅
+- **做什么**：OCR 结果按（图，题）展开成题目列表，逐题搜索，每题保留匹配度最高的结果；识别失败不阻塞其他题目
+- **涉及文件**：`src/pages/SearchPage.tsx` — handleStartSearch 重构
+- **验收**：N 题逐题搜索（console 可验证）；单图识别失败记为一条错误结果
+
+### 步骤 5.3 — 结果页分页滑动 UI ✅
+- **做什么**：结果页重构为固定高度 flex 布局：顶部答案汇总条（每 5 题一行）+ 中间左右滑动分页区（CSS scroll-snap，零依赖）+ 底部数字导航（当前页高亮、点击跳页、自动滚入视野）
+- **涉及文件**：
+  - `src/components/QuestionPager.tsx` — 新增
+  - `src/index.css` — `.results-page` / `.results-summary` / `.question-pager` 样式
+  - `src/components/AnswerCard.tsx` — 增加 `fullStem` 属性（判断题答案去重）
+  - `src/components/OcrProgress.tsx` — 进度数字去掉「张」单位（识别+匹配两阶段共用）
+- **附带修复**：`src/main.tsx` 加 `BrowserRouter basename`（与 vite base `/bank-search/` 一致）——线上入口路由不匹配的既存 bug
+- **验收**：真实浏览器 15 项 DOM 断言通过（汇总/页宽/跳页/高亮联动/各题型内容/无溢出）；lint + build 全绿
+
+### 步骤 5.4 — 手机真机测试 ⏳
+- **做什么**：真实试卷照片（一页多题、一图一题、混合题型）在 iPhone 上全流程测试
+- **验收**：拍一页 5 题 → 答案汇总 + 左右滑动逐题查看答案
+
+### 步骤 5.5 — 文档收尾 ✅
+- **做什么**：requirements / tech-spec / dev-plan / design-spec 更新至 v1.2，写开发日志
+- **验收**：文档与实现一致
+
+**Phase 5 退出标准**：手机上一张试卷照片可拆出多题并滑动查看各题答案。
+
+---
+
+> 版本：v1.2 | 日期：2026-11-14
